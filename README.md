@@ -1,4 +1,4 @@
-# 🛰️ caddy-hostnames
+# caddy-hostnames
 
 **Automatically publish `.local` hostnames from Docker containers via mDNS using [Caddy-Docker-Proxy](https://github.com/lucaslorentz/caddy-docker-proxy).**
 
