@@ -52,5 +52,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DOMAIN_REGEX=.*\.local$         # Only .local names (default)
-      - PUBLISHED_IP=auto      # Or use "auto" to auto-detect
+      - PUBLISHED_IP=auto               # Or use "auto" to auto-detect
 ```
