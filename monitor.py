@@ -1,7 +1,14 @@
-import docker
 import socket
+import os
 import re
+
+import docker
 from zeroconf import Zeroconf, ServiceInfo
+
+DOMAIN_REGEX = os.environ.get("DOMAIN_REGEX", r".*\.local$")
+PUBLISHED_IP_SETTING = os.environ.get("PUBLISHED_IP", "auto")
+
+domain_pattern = re.compile(DOMAIN_REGEX)
 
 # Docker client
 client = docker.from_env()
@@ -11,7 +18,7 @@ zeroconf = Zeroconf()
 label_cache = {}        # container_id → [hostnames]
 published_services = {} # hostname → ServiceInfo
 
-def get_host_ip():
+def detect_IP():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -22,16 +29,23 @@ def get_host_ip():
         s.close()
     return ip
 
-HOST_IP = get_host_ip()
+def get_published_ip():
+    if PUBLISHED_IP_SETTING.lower() != "auto":
+        return PUBLISHED_IP_SETTING
+    return detect_IP()
 
-def is_local_hostname(hostname):
-    return hostname.endswith(".local")
+
+PUBLISHED_IP = get_published_ip()
+
+
+def is_valid_hostname(hostname):
+    return domain_pattern.match(hostname) is not None
 
 def parse_hostnames(label_value):
     return [h.strip() for h in re.split(r'[,\s]+', label_value) if h.strip()]
 
-def publish_hostname(hostname, container_name="unknown"):
-    if not is_local_hostname(hostname):
+def publish_hostname(hostname, container_name=" unknown"):
+    if not is_valid_hostname(hostname):
         print(f"[Skip] Not publishing non-.local hostname: {hostname}")
         return
     if hostname in published_services:
@@ -42,13 +56,13 @@ def publish_hostname(hostname, container_name="unknown"):
             type_="_http._tcp.local.",
             name=f"{hostname}._http._tcp.local.",
             port=80,
-            addresses=[socket.inet_aton(HOST_IP)],
+            addresses=[socket.inet_aton(PUBLISHED_IP)],
             properties={},
             server=f"{hostname}."  # Hostname to publish
         )
         zeroconf.register_service(info)
         published_services[hostname] = info
-        print(f"[Zeroconf:{container_name}] Published {hostname} → {HOST_IP}")
+        print(f"[Zeroconf:{container_name}] Published {hostname} → {PUBLISHED_IP}")
     except Exception as e:
         print(f"[Zeroconf:{container_name}] Failed to publish {hostname}: {e}")
 
@@ -107,7 +121,10 @@ def handle_event(event):
             label_cache.pop(container_id, None)
 
 def main():
-    print("Starting caddy label monitor with python-zeroconf (.local only)...")
+    print("Starting caddy label monitor...")
+    print(f"[Config] DOMAIN_REGEX: {DOMAIN_REGEX}")
+    print(f"[Config] PUBLISH_IP: {PUBLISHED_IP}")
+
     get_caddy_labeled_containers()
 
     try:
