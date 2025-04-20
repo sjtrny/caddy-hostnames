@@ -69,11 +69,11 @@ def handle_container_up(container_id):
 
             info = ServiceInfo(
                 type_="_http._tcp.local.",
-                name=f"{fqdn}._http._tcp.local.",
+                name=f"{fqdn}._http._tcp.local.", # Use FQDN here for mDNS hostname resolution
                 port=80,
                 addresses=[socket.inet_aton(PUBLISHED_IP)],
                 properties={},
-                server=f"{fqdn}",  # Hostname to publish
+                server=f"{fqdn}.", # Must append . to FQDN for mDNS hostname resolution
             )
 
             # Attempt to publish
