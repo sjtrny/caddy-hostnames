@@ -69,7 +69,7 @@ def handle_container_up(container_id):
 
             info = ServiceInfo(
                 type_="_http._tcp.local.",
-                name=f"{site_extract.subdomain}._http._tcp.local.",
+                name=f"{fqdn}._http._tcp.local.",
                 port=80,
                 addresses=[socket.inet_aton(PUBLISHED_IP)],
                 properties={},
