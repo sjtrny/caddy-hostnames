@@ -73,7 +73,7 @@ def handle_container_up(container_id):
                 port=80,
                 addresses=[socket.inet_aton(PUBLISHED_IP)],
                 properties={},
-                server=f"{fqdn}",
+                server=f"{fqdn}.", # Must append . to FQDN for mDNS hostname resolution
             )
 
             # Attempt to publish
