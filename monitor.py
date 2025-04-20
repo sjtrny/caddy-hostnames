@@ -1,22 +1,26 @@
-import socket
 import os
 import re
+import signal
+import socket
 
 import docker
+import tldextract
 from zeroconf import Zeroconf, ServiceInfo
 
-DOMAIN_REGEX = os.environ.get("DOMAIN_REGEX", r".*\.local$")
+
+def exit_gracefully(*args):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGTERM, exit_gracefully)
+
 PUBLISHED_IP_SETTING = os.environ.get("PUBLISHED_IP", "auto")
 
-domain_pattern = re.compile(DOMAIN_REGEX)
-
-# Docker client
 client = docker.from_env()
-
-# Track published services
 zeroconf = Zeroconf()
-label_cache = {}        # container_id → [hostnames]
-published_services = {} # hostname → ServiceInfo
+
+containers_dict = {}
+
 
 def detect_IP():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -29,6 +33,7 @@ def detect_IP():
         s.close()
     return ip
 
+
 def get_published_ip():
     if PUBLISHED_IP_SETTING.lower() != "auto":
         return PUBLISHED_IP_SETTING
@@ -38,103 +43,115 @@ def get_published_ip():
 PUBLISHED_IP = get_published_ip()
 
 
-def is_valid_hostname(hostname):
-    return domain_pattern.match(hostname) is not None
-
-def parse_hostnames(label_value):
-    return [h.strip() for h in re.split(r'[,\s]+', label_value) if h.strip()]
-
-def publish_hostname(hostname, container_name=" unknown"):
-    if not is_valid_hostname(hostname):
-        print(f"[Skip] Not publishing non-.local hostname: {hostname}")
-        return
-    if hostname in published_services:
-        return
-
+def handle_container_up(container_id):
     try:
-        info = ServiceInfo(
-            type_="_http._tcp.local.",
-            name=f"{hostname}._http._tcp.local.",
-            port=80,
-            addresses=[socket.inet_aton(PUBLISHED_IP)],
-            properties={},
-            server=f"{hostname}."  # Hostname to publish
-        )
-        zeroconf.register_service(info)
-        published_services[hostname] = info
-        print(f"[Zeroconf:{container_name}] Published {hostname} → {PUBLISHED_IP}")
-    except Exception as e:
-        print(f"[Zeroconf:{container_name}] Failed to publish {hostname}: {e}")
-
-def unpublish_hostname(hostname, container_name="unknown"):
-    if not is_local_hostname(hostname):
+        container = client.containers.get(container_id)
+    except docker.errors.NotFound:
         return
-    info = published_services.pop(hostname, None)
-    if info:
-        try:
-            zeroconf.unregister_service(info)
-            print(f"[Zeroconf:{container_name}] Unpublished {hostname}")
-        except Exception as e:
-            print(f"[Zeroconf:{container_name}] Failed to unpublish {hostname}: {e}")
 
-def get_caddy_labeled_containers():
-    containers = client.containers.list(all=True)
-    for container in containers:
-        labels = container.attrs['Config'].get('Labels', {})
-        if 'caddy' in labels:
-            raw_label = labels['caddy']
-            hostnames = parse_hostnames(raw_label)
-            label_cache[container.id] = hostnames
-            for hostname in hostnames:
-                publish_hostname(hostname, container.name)
-            print(f"[Startup] {container.name}: caddy={hostnames}")
+    # If container has a caddy label
+    labels = container.attrs["Config"].get("Labels", {})
+    if "caddy" in labels:
+
+        site_addresses = re.split(r"[,\s]+", labels["caddy"])
+
+        for site_address in site_addresses:
+
+            site_extract = tldextract.extract(site_address)
+
+            if site_extract.domain != "local":
+                print(
+                    f"[{container.name}][REGISTER] Skipping non-local address '{site_address}'"
+                )
+                continue
+
+            fqdn = site_extract.subdomain + "." + site_extract.domain
+
+            info = ServiceInfo(
+                type_="_http._tcp.local.",
+                name=f"{site_extract.subdomain}._http._tcp.local.",
+                port=80,
+                addresses=[socket.inet_aton(PUBLISHED_IP)],
+                properties={},
+                server=f"{fqdn}",  # Hostname to publish
+            )
+
+            # Attempt to publish
+            try:
+                zeroconf.register_service(info)
+            except Exception as e:
+                print(
+                    f"[{container.name}][REGISTER] Failed to register {fqdn} ({site_address}): {repr(e)}"
+                )
+            else:
+
+                if container_id not in containers_dict:
+                    containers_dict[container_id] = {
+                        "container": container,
+                        "infos": [],
+                    }
+
+                containers_dict[container_id]["infos"].append(info)
+
+                print(
+                    f"[{container.name}][REGISTER] Success {fqdn} ('{site_address}') → {PUBLISHED_IP}"
+                )
+
+
+def handle_container_down(container_id):
+    try:
+        container_dict = containers_dict.pop(container_id)
+    except KeyError:
+        pass
+    else:
+        container = container_dict["container"]
+        for info in container_dict["infos"]:
+            try:
+                zeroconf.unregister_service(info)
+                print(f"[{container.name}][UNREGISTER] Success {info.server}")
+            except Exception as e:
+                print(
+                    f"[{container.name}][UNREGISTER] Failed to unregister {info.server}"
+                )
+
 
 def handle_event(event):
-    if event['Type'] != 'container':
+    if event["Type"] != "container":
         return
 
-    action = event['Action']
-    container_id = event['id']
+    action = event["Action"]
+    container_id = event["id"]
 
-    if action in ['start', 'update']:
-        try:
-            container = client.containers.get(container_id)
-            labels = container.attrs['Config'].get('Labels', {})
-            if 'caddy' in labels:
-                raw_label = labels['caddy']
-                hostnames = parse_hostnames(raw_label)
-                label_cache[container.id] = hostnames
-                for hostname in hostnames:
-                    publish_hostname(hostname, container.name)
-                print(f"[Event: {action}] {container.name}: caddy={hostnames}")
-        except docker.errors.NotFound:
-            pass
+    if action in ["start", "update"]:
+        handle_container_up(container_id)
+    elif action in ["stop", "die", "destroy"]:
+        handle_container_down(container_id)
 
-    elif action in ['stop', 'die', 'destroy']:
-        hostnames = label_cache.get(container_id, [])
-        name = event.get('Actor', {}).get('Attributes', {}).get('name', container_id[:12])
-        if hostnames:
-            for hostname in hostnames:
-                unpublish_hostname(hostname, name)
-            print(f"[Event: {action}] {name} stopped or removed. Last known caddy={hostnames}")
-        if action == 'destroy':
-            label_cache.pop(container_id, None)
 
 def main():
-    print("Starting caddy label monitor...")
-    print(f"[Config] DOMAIN_REGEX: {DOMAIN_REGEX}")
-    print(f"[Config] PUBLISH_IP: {PUBLISHED_IP}")
+    print("Starting...")
+    print(f"[CONFIG] PUBLISH_IP: {PUBLISHED_IP}")
 
-    get_caddy_labeled_containers()
+    containers = client.containers.list(all=True)
+    for container in containers:
+        handle_container_up(container.id)
 
+    print("Startup complete.")
+
+    # Main event loop
     try:
         for event in client.events(decode=True):
             handle_event(event)
     except KeyboardInterrupt:
-        print("Stopping monitor...")
-        for hostname in list(published_services.keys()):
-            unpublish_hostname(hostname)
+        print("Shutting down...")
+
+        container_ids = list(containers_dict.keys())
+        for container_id in container_ids:
+            handle_container_down(container_id)
+
         zeroconf.close()
+        print("Shutdown complete.")
+
 
 if __name__ == "__main__":
     main()

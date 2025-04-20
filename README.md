@@ -20,7 +20,6 @@ Volumes:
 
 Environment Variables
 - `PUBLISHED_IP` (default `auto`), set the ip address to be be associated with the hostnames
-- `DOMAIN_REGEX` (default `.*\.local$ `), specifies which hostnames from the caddy label to use
 
 ## Example - Host mode
 
@@ -49,8 +48,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - PUBLISHED_IP=auto               # Or use "auto" to auto-detect
-      - DOMAIN_REGEX=.*\.local$         # Only .local names (default)
+      - PUBLISHED_IP=auto
 
   hello:
     image: nginx
@@ -93,15 +91,6 @@ services:
       - CADDY_INGRESS_NETWORKS=bridge
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
-  hello:
-    image: nginx
-    restart: unless-stopped
-    networks:
-      - bridge
-    labels:
-      - caddy=hello.local
-      - caddy.reverse_proxy={{upstreams 80}}
   
   caddy-hostnames:
     image: ghcr.io/sjtrny/caddy-hostnames:release
@@ -111,6 +100,15 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - PUBLISHED_IP=auto               # Or use "auto" to auto-detect
-      - DOMAIN_REGEX=.*\.local$         # Only .local names (default)
+      - PUBLISHED_IP=192.168.0.1
+
+  hello:
+    image: nginx
+    restart: unless-stopped
+    networks:
+      - bridge
+    labels:
+      - caddy=hello.local
+      - caddy.reverse_proxy={{upstreams 80}}
+
 ```
