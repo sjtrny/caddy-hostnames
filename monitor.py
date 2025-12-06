@@ -43,110 +43,101 @@ def get_published_ip():
 PUBLISHED_IP = get_published_ip()
 
 
-def handle_container_up(container_id):
-    try:
-        container = client.containers.get(container_id)
-    except docker.errors.NotFound:
+def handle_container_up_from_summary(summary):
+    container_id = summary["Id"]
+    name = (summary.get("Names") or [container_id[:12]])[0].lstrip("/")
+
+    labels = summary.get("Labels") or {}
+    if "caddy" not in labels:
         return
 
-    # If container has a caddy label
-    labels = container.attrs["Config"].get("Labels", {})
-    if "caddy" in labels:
+    site_addresses = re.split(r"[,\s]+", labels["caddy"].strip())
+    infos = []
 
-        site_addresses = re.split(r"[,\s]+", labels["caddy"])
+    for site_address in filter(None, site_addresses):
+        site_extract = tldextract.extract(site_address)
 
-        for site_address in site_addresses:
+        if site_extract.domain != "local":
+            print(f"[{name}][REGISTER] Skipping non-local address '{site_address}'")
+            continue
 
-            site_extract = tldextract.extract(site_address)
+        fqdn = f"{site_extract.subdomain}.{site_extract.domain}"
 
-            if site_extract.domain != "local":
-                print(
-                    f"[{container.name}][REGISTER] Skipping non-local address '{site_address}'"
-                )
-                continue
+        info = ServiceInfo(
+            type_="_http._tcp.local.",
+            name=f"{site_extract.subdomain}._http._tcp.local.",
+            port=80,
+            addresses=[socket.inet_aton(PUBLISHED_IP)],
+            properties={},
+            server=f"{fqdn}.",
+        )
 
-            fqdn = site_extract.subdomain + "." + site_extract.domain
+        try:
+            zeroconf.register_service(info)
+        except Exception as e:
+            print(f"[{name}][REGISTER] Failed to register {fqdn} ({site_address}): {repr(e)}")
+        else:
+            infos.append(info)
+            print(f"[{name}][REGISTER] Success {fqdn} ('{site_address}') → {PUBLISHED_IP}")
 
-            info = ServiceInfo(
-                type_="_http._tcp.local.",
-                name=f"{site_extract.subdomain}._http._tcp.local.", # Use subdomain here for service name
-                port=80,
-                addresses=[socket.inet_aton(PUBLISHED_IP)],
-                properties={},
-                server=f"{fqdn}.", # Must append . to FQDN for mDNS hostname resolution
-            )
+    if infos:
+        containers_dict[container_id] = {"name": name, "infos": infos}
 
-            # Attempt to publish
-            try:
-                zeroconf.register_service(info)
-            except Exception as e:
-                print(
-                    f"[{container.name}][REGISTER] Failed to register {fqdn} ({site_address}): {repr(e)}"
-                )
-            else:
-
-                if container_id not in containers_dict:
-                    containers_dict[container_id] = {
-                        "container": container,
-                        "infos": [],
-                    }
-
-                containers_dict[container_id]["infos"].append(info)
-
-                print(
-                    f"[{container.name}][REGISTER] Success {fqdn} ('{site_address}') → {PUBLISHED_IP}"
-                )
 
 
 def handle_container_down(container_id):
     try:
         container_dict = containers_dict.pop(container_id)
     except KeyError:
-        pass
-    else:
-        container = container_dict["container"]
-        for info in container_dict["infos"]:
-            try:
-                zeroconf.unregister_service(info)
-                print(f"[{container.name}][UNREGISTER] Success {info.server}")
-            except Exception as e:
-                print(
-                    f"[{container.name}][UNREGISTER] Failed to unregister {info.server}"
-                )
+        return
+
+    name = container_dict["name"]
+    for info in container_dict["infos"]:
+        try:
+            zeroconf.unregister_service(info)
+            print(f"[{name}][UNREGISTER] Success {info.server}")
+        except Exception as e:
+            print(f"[{name}][UNREGISTER] Failed to unregister {info.server}: {e!r}")
 
 
 def handle_event(event):
-    # Safely ignore non-container or malformed events
     if event.get("Type") != "container":
         return
 
     action = event.get("Action")
-    container_id = (
-        event.get("Actor", {}).get("ID") or
-        event.get("id")  # fallback for older daemons
-    )
+    actor = event.get("Actor", {})
+    attrs = actor.get("Attributes", {}) or {}
 
+    container_id = actor.get("ID") or event.get("id")
     if not container_id:
-        print(f"[WARN] Container event missing ID: {event}")
+        print(f"[WARN] Container event without ID: {event}")
         return
 
     if action in ["start", "update"]:
-        handle_container_up(container_id)
+        summary = {
+            "Id": container_id,
+            "Names": [attrs.get("name", container_id[:12])],
+            "Labels": attrs,
+        }
+        # Optionally clear any previous registrations for this ID
+        if container_id in containers_dict:
+            handle_container_down(container_id)
+        handle_container_up_from_summary(summary)
     elif action in ["stop", "die", "destroy"]:
         handle_container_down(container_id)
-
 
 def main():
     print("Starting...")
     print(f"[CONFIG] PUBLISH_IP: {PUBLISHED_IP}")
 
-    containers = client.containers.list(all=True)
-    for container in containers:
-        handle_container_up(container.id)
+    # One HTTP call, already filtered to caddy-labeled containers
+    summaries = client.api.containers(all=True, filters={"label": "caddy"})
+
+    for summary in summaries:
+        handle_container_up_from_summary(summary)
 
     print("Startup complete.")
 
-    # Main event loop
     try:
         for event in client.events(decode=True):
             handle_event(event)
