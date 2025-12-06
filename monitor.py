@@ -116,11 +116,19 @@ def handle_container_down(container_id):
 
 
 def handle_event(event):
-    if event["Type"] != "container":
+    # Safely ignore non-container or malformed events
+    if event.get("Type") != "container":
         return
 
-    action = event["Action"]
-    container_id = event["id"]
+    action = event.get("Action")
+    container_id = (
+        event.get("Actor", {}).get("ID") or
+        event.get("id")  # fallback for older daemons
+    )
+
+    if not container_id:
+        print(f"[WARN] Container event missing ID: {event}")
+        return
 
     if action in ["start", "update"]:
         handle_container_up(container_id)

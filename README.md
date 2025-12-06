@@ -1,6 +1,6 @@
 # caddy-hostnames
 
-**Automatically publish `.local` hostnames from Docker containers via mDNS using [Caddy-Docker-Proxy](https://github.com/lucaslorentz/caddy-docker-proxy).**
+**Automatically publish `.local` hostnames from Docker containers via mDNS using labels from [Caddy-Docker-Proxy](https://github.com/lucaslorentz/caddy-docker-proxy).**
 
 This container monitors your Docker environment for containers that have a `caddy` label, and automatically advertises 
 any `.local` hostnames in that label using mDNS.
