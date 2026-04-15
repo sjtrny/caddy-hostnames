@@ -50,16 +50,16 @@ def handle_container_up_from_summary(summary):
 
     labels = summary.get("Labels") or {}
     
-    caddy_label_value = None
+    site_addresses = []
+
     for k, v in labels.items():
         if prog.match(k):
-            caddy_label_value = v
-            break
+            site_addresses.append(re.split(r"[,\s]+", v.strip()))
 
-    if caddy_label_value == None:
+    # If no caddy labels found we end here
+    if len(site_addresses) == 0:
         return
 
-    site_addresses = re.split(r"[,\s]+", caddy_label_value.strip())
     infos = []
 
     for site_address in filter(None, site_addresses):
