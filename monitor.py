@@ -1,3 +1,4 @@
+import argparse
 import os
 import re
 import signal
@@ -48,10 +49,17 @@ def handle_container_up_from_summary(summary):
     name = (summary.get("Names") or [container_id[:12]])[0].lstrip("/")
 
     labels = summary.get("Labels") or {}
-    if "caddy" not in labels:
+    
+    caddy_label_value = None
+    for k, v in labels:
+        if prog.match(k):
+            caddy_label_value = v
+            break
+
+    if caddy_label_value == None:
         return
 
-    site_addresses = re.split(r"[,\s]+", labels["caddy"].strip())
+    site_addresses = re.split(r"[,\s]+", caddy_label_value.strip())
     infos = []
 
     for site_address in filter(None, site_addresses):
@@ -126,12 +134,15 @@ def handle_event(event):
     elif action in ["stop", "die", "destroy"]:
         handle_container_down(container_id)
 
+
+prog = re.compile("^caddy(|_\d+)$")
+
+
 def main():
     print("Starting...")
     print(f"[CONFIG] PUBLISH_IP: {PUBLISHED_IP}")
 
-    # One HTTP call, already filtered to caddy-labeled containers
-    summaries = client.api.containers(all=True, filters={"label": "caddy"})
+    summaries = client.api.containers(all=True)
 
     for summary in summaries:
         handle_container_up_from_summary(summary)
