@@ -54,7 +54,7 @@ def handle_container_up_from_summary(summary):
 
     for k, v in labels.items():
         if prog.match(k):
-            site_addresses.append(re.split(r"[,\s]+", v.strip()))
+            site_addresses.extend(re.split(r"[,\s]+", v.strip()))
 
     # If no caddy labels found we end here
     if len(site_addresses) == 0:
