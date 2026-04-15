@@ -51,7 +51,7 @@ def handle_container_up_from_summary(summary):
     labels = summary.get("Labels") or {}
     
     caddy_label_value = None
-    for k, v in labels:
+    for k, v in labels.items():
         if prog.match(k):
             caddy_label_value = v
             break
