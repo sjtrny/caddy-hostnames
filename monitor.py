@@ -4,6 +4,7 @@ import re
 import signal
 import socket
 from contextlib import suppress
+from urllib.parse import urlparse
 
 import aiodocker
 from zeroconf import ServiceInfo
@@ -48,17 +49,26 @@ def parse_site_addresses(labels):
 
 
 def build_service_info(site_address):
-    site_address = site_address.strip().rstrip(".").lower()
+    raw = site_address.strip()
 
-    if not site_address.endswith(".local"):
+    # Accept all:
+    #   x.local
+    #   y.x.local
+    #   http://x.local
+    #   https://y.x.local.local:8443/path
+    if "://" in raw:
+        parsed = urlparse(raw)
+        host = (parsed.hostname or "").rstrip(".").lower()
+    else:
+        host = raw.rstrip(".").lower()
+
+    if not host.endswith(".local"):
         return None, None
 
-    # strip the trailing ".local"
-    left = site_address[:-6]
+    left = host[:-6]  # strip ".local"
     if not left:
         return None, None
 
-    # split labels and reject empty ones
     labels = [label for label in left.split(".") if label]
     if not labels:
         return None, None
