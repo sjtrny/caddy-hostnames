@@ -20,6 +20,7 @@ Volumes:
 
 Environment Variables
 - `PUBLISHED_IP` (default `auto`), set the ip address to be be associated with the hostnames
+- `REGISTER_CONCURRENCY` (default `32`), the maximum number of concurrent domain registrations
 
 ## Example - Host mode
 
