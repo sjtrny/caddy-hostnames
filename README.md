@@ -20,7 +20,7 @@ Volumes:
 
 Environment Variables
 - `PUBLISHED_IP` (default `auto`), set the ip address to be be associated with the hostnames
-- `REGISTER_CONCURRENCY` (default `32`), the maximum number of concurrent domain registrations
+- `REGISTER_CONCURRENCY` (default `32`), the maximum number of domains being registered at one time via mdns. Used to  prevent network flooding.
 
 ## Example - Host mode
 
