@@ -1,2 +1,2 @@
-zeroconf
-aiodocker
+zeroconf==0.148.0
+aiodocker==0.26.0

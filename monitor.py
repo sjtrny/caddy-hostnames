@@ -12,7 +12,7 @@ from zeroconf.asyncio import AsyncZeroconf
 
 
 PUBLISHED_IP_SETTING = os.environ.get("PUBLISHED_IP", "auto")
-REGISTER_CONCURRENCY = int(os.environ.get("MDNS_REGISTER_CONCURRENCY", "32"))
+MDNS_REGISTER_CONCURRENCY = int(os.environ.get("MDNS_REGISTER_CONCURRENCY", "32"))
 
 containers_dict = {}
 prog = re.compile(r"^caddy(|_\d+)$")
@@ -24,16 +24,26 @@ def detect_ip():
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:
-        ip = "127.0.0.1"
+        ip = None
     finally:
         s.close()
+
+    if not ip or ip.startswith("127."):
+        return None
     return ip
 
 
 def get_published_ip():
     if PUBLISHED_IP_SETTING.lower() != "auto":
         return PUBLISHED_IP_SETTING
-    return detect_ip()
+
+    ip = detect_ip()
+    if ip is None:
+        raise RuntimeError(
+            "PUBLISHED_IP=auto could not determine a non-loopback IPv4 address; "
+            "set PUBLISHED_IP explicitly."
+        )
+    return ip
 
 
 PUBLISHED_IP = get_published_ip()
@@ -74,8 +84,7 @@ def build_service_info(site_address):
         return None, None
 
     fqdn = ".".join(labels) + ".local"
-    instance = labels[0]
-
+    instance = ".".join(labels)
     info = ServiceInfo(
         type_="_http._tcp.local.",
         name=f"{instance}._http._tcp.local.",
@@ -84,6 +93,7 @@ def build_service_info(site_address):
         properties={},
         server=f"{fqdn}.",
     )
+
     return fqdn, info
 
 
@@ -102,7 +112,8 @@ async def register_info(aiozc, sem, name, fqdn, site_address, info):
 
 async def unregister_info(aiozc, name, info):
     try:
-        await aiozc.async_unregister_service(info)
+        task = await aiozc.async_unregister_service(info)
+        await task
         print(f"[{name}][UNREGISTER] Success {info.server}")
     except Exception as e:
         print(f"[{name}][UNREGISTER] Failed to unregister {info.server}: {e!r}")
@@ -121,13 +132,19 @@ async def handle_container_up_from_summary(aiozc, sem, summary):
     seen_servers = set()
 
     for site_address in site_addresses:
-        fqdn, info = build_service_info(site_address)
+        try:
+            fqdn, info = build_service_info(site_address)
+        except Exception as e:
+            print(f"[{name}][REGISTER] Skipping invalid address '{site_address}': {e!r}")
+            continue
+
         if info is None:
             print(f"[{name}][REGISTER] Skipping non-local or unsupported address '{site_address}'")
             continue
 
         if info.server in seen_servers:
             continue
+
         seen_servers.add(info.server)
         infos_to_register.append((fqdn, site_address, info))
 
@@ -188,7 +205,7 @@ async def handle_event(aiozc, sem, event):
 
 
 async def list_startup_summaries(docker):
-    containers = await docker.containers.list(all=True)
+    containers = await docker.containers.list()
 
     summaries = []
     for container in containers:
@@ -224,11 +241,11 @@ async def shutdown_all(aiozc):
 
 async def main():
     print("Starting...")
-    print(f"[CONFIG] PUBLISH_IP: {PUBLISHED_IP}")
-    print(f"[CONFIG] MDNS_REGISTER_CONCURRENCY: {REGISTER_CONCURRENCY}")
+    print(f"[CONFIG] PUBLISHED_IP: {PUBLISHED_IP}")
+    print(f"[CONFIG] MDNS_REGISTER_CONCURRENCY: {MDNS_REGISTER_CONCURRENCY}")
 
     stop_event = asyncio.Event()
-    sem = asyncio.Semaphore(REGISTER_CONCURRENCY)
+    sem = asyncio.Semaphore(MDNS_REGISTER_CONCURRENCY)
 
     def request_shutdown(*_args):
         stop_event.set()
