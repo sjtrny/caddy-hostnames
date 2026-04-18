@@ -84,8 +84,7 @@ def build_service_info(site_address):
         return None, None
 
     fqdn = ".".join(labels) + ".local"
-    instance = labels[0]
-
+    instance = ".".join(labels)
     info = ServiceInfo(
         type_="_http._tcp.local.",
         name=f"{instance}._http._tcp.local.",
@@ -94,6 +93,7 @@ def build_service_info(site_address):
         properties={},
         server=f"{fqdn}.",
     )
+
     return fqdn, info
 
 
