@@ -23,7 +23,7 @@ Environment Variables
   - When set to `auto`, the container will try to detect a non-loopback IPv4 address at startup.
   - If detection fails, the process exits with an error instead of advertising `127.0.0.1`.
   - In bridge, overlay, or restricted-network setups, set `PUBLISHED_IP` explicitly.
-- `REGISTER_CONCURRENCY` (default `32`), the maximum number of domains being registered at one time via mdns. Used to  prevent network flooding.
+- `MDNS_REGISTER_CONCURRENCY` (default `32`), the maximum number of domains being registered at one time via mdns. Used to  prevent network flooding.
 
 ## Example - Host mode
 

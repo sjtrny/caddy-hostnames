@@ -12,7 +12,7 @@ from zeroconf.asyncio import AsyncZeroconf
 
 
 PUBLISHED_IP_SETTING = os.environ.get("PUBLISHED_IP", "auto")
-REGISTER_CONCURRENCY = int(os.environ.get("MDNS_REGISTER_CONCURRENCY", "32"))
+MDNS_REGISTER_CONCURRENCY = int(os.environ.get("MDNS_REGISTER_CONCURRENCY", "32"))
 
 containers_dict = {}
 prog = re.compile(r"^caddy(|_\d+)$")
@@ -242,10 +242,10 @@ async def shutdown_all(aiozc):
 async def main():
     print("Starting...")
     print(f"[CONFIG] PUBLISHED_IP: {PUBLISHED_IP}")
-    print(f"[CONFIG] MDNS_REGISTER_CONCURRENCY: {REGISTER_CONCURRENCY}")
+    print(f"[CONFIG] MDNS_REGISTER_CONCURRENCY: {MDNS_REGISTER_CONCURRENCY}")
 
     stop_event = asyncio.Event()
-    sem = asyncio.Semaphore(REGISTER_CONCURRENCY)
+    sem = asyncio.Semaphore(MDNS_REGISTER_CONCURRENCY)
 
     def request_shutdown(*_args):
         stop_event.set()
