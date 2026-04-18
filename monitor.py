@@ -188,7 +188,7 @@ async def handle_event(aiozc, sem, event):
 
 
 async def list_startup_summaries(docker):
-    containers = await docker.containers.list(all=True)
+    containers = await docker.containers.list()
 
     summaries = []
     for container in containers:
