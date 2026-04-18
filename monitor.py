@@ -112,7 +112,8 @@ async def register_info(aiozc, sem, name, fqdn, site_address, info):
 
 async def unregister_info(aiozc, name, info):
     try:
-        await aiozc.async_unregister_service(info)
+        task = await aiozc.async_unregister_service(info)
+        await task
         print(f"[{name}][UNREGISTER] Success {info.server}")
     except Exception as e:
         print(f"[{name}][UNREGISTER] Failed to unregister {info.server}: {e!r}")
