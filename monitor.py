@@ -24,16 +24,26 @@ def detect_ip():
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:
-        ip = "127.0.0.1"
+        ip = None
     finally:
         s.close()
+
+    if not ip or ip.startswith("127."):
+        return None
     return ip
 
 
 def get_published_ip():
     if PUBLISHED_IP_SETTING.lower() != "auto":
         return PUBLISHED_IP_SETTING
-    return detect_ip()
+
+    ip = detect_ip()
+    if ip is None:
+        raise RuntimeError(
+            "PUBLISHED_IP=auto could not determine a non-loopback IPv4 address; "
+            "set PUBLISHED_IP explicitly."
+        )
+    return ip
 
 
 PUBLISHED_IP = get_published_ip()
@@ -224,7 +234,7 @@ async def shutdown_all(aiozc):
 
 async def main():
     print("Starting...")
-    print(f"[CONFIG] PUBLISH_IP: {PUBLISHED_IP}")
+    print(f"[CONFIG] PUBLISHED_IP: {PUBLISHED_IP}")
     print(f"[CONFIG] MDNS_REGISTER_CONCURRENCY: {REGISTER_CONCURRENCY}")
 
     stop_event = asyncio.Event()

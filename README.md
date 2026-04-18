@@ -19,7 +19,10 @@ Volumes:
 - mount the docker socket to listen to docker events
 
 Environment Variables
-- `PUBLISHED_IP` (default `auto`), set the ip address to be be associated with the hostnames
+- `PUBLISHED_IP` (default `auto`), the IPv4 address to advertise for published `.local` hostnames.
+  - When set to `auto`, the container will try to detect a non-loopback IPv4 address at startup.
+  - If detection fails, the process exits with an error instead of advertising `127.0.0.1`.
+  - In bridge, overlay, or restricted-network setups, set `PUBLISHED_IP` explicitly.
 - `REGISTER_CONCURRENCY` (default `32`), the maximum number of domains being registered at one time via mdns. Used to  prevent network flooding.
 
 ## Example - Host mode
