@@ -132,13 +132,19 @@ async def handle_container_up_from_summary(aiozc, sem, summary):
     seen_servers = set()
 
     for site_address in site_addresses:
-        fqdn, info = build_service_info(site_address)
+        try:
+            fqdn, info = build_service_info(site_address)
+        except Exception as e:
+            print(f"[{name}][REGISTER] Skipping invalid address '{site_address}': {e!r}")
+            continue
+
         if info is None:
             print(f"[{name}][REGISTER] Skipping non-local or unsupported address '{site_address}'")
             continue
 
         if info.server in seen_servers:
             continue
+
         seen_servers.add(info.server)
         infos_to_register.append((fqdn, site_address, info))
 
