@@ -4,7 +4,6 @@ services:
       dockerfile: ./Dockerfile
     environment:
       PUBLISHED_IP: 192.168.20.178
-      MDNS_REGISTER_CONCURRENCY: "32"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     network_mode: host
