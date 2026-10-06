@@ -15,6 +15,7 @@ import aiodocker
 MDNS_GROUP = "224.0.0.251"
 MDNS_PORT = 5353
 MDNS_TTL = 120
+LEGACY_UNICAST_TTL = 10
 
 TYPE_A = 1
 TYPE_AAAA = 28
@@ -146,13 +147,13 @@ def read_name(data, position):
     return ".".join(labels).lower() + ".", end if end is not None else position
 
 
-def parse_questions(data):
+def parse_query(data):
     if len(data) < 12:
         raise ValueError("truncated DNS header")
 
     transaction_id, flags, question_count = struct.unpack_from("!HHH", data)
     if flags & 0x8000:
-        return transaction_id, flags, []
+        return transaction_id, flags, [], b""
     if question_count > 64:
         raise ValueError("too many DNS questions")
 
@@ -166,29 +167,68 @@ def parse_questions(data):
         position += 4
         questions.append((name, record_type, record_class))
 
+    # Legacy-unicast responses must repeat the question. Preserve its exact
+    # wire form so case and compression pointers remain unchanged at offset 12.
+    return transaction_id, flags, questions, data[12:position]
+
+
+def parse_questions(data):
+    transaction_id, flags, questions, _ = parse_query(data)
     return transaction_id, flags, questions
 
 
-def record(name, record_type, rdata, ttl=MDNS_TTL):
+def record(
+    name,
+    record_type,
+    rdata,
+    ttl=MDNS_TTL,
+    record_class=CLASS_CACHE_FLUSH,
+):
     return (
         encode_name(name)
-        + struct.pack("!HHIH", record_type, CLASS_CACHE_FLUSH, ttl, len(rdata))
+        + struct.pack("!HHIH", record_type, record_class, ttl, len(rdata))
         + rdata
     )
 
 
-def a_record(name, published_ip, ttl=MDNS_TTL):
-    return record(name, TYPE_A, socket.inet_aton(published_ip), ttl)
+def a_record(
+    name,
+    published_ip,
+    ttl=MDNS_TTL,
+    record_class=CLASS_CACHE_FLUSH,
+):
+    return record(
+        name,
+        TYPE_A,
+        socket.inet_aton(published_ip),
+        ttl,
+        record_class,
+    )
 
 
-def nsec_record(name, ttl=MDNS_TTL):
+def nsec_record(
+    name,
+    ttl=MDNS_TTL,
+    record_class=CLASS_CACHE_FLUSH,
+):
     # Window 0, one bitmap byte, with only type A (bit 1) present. The NSEC
     # Next Domain Name is deliberately uncompressed as required by RFC 4034.
     rdata = encode_name(name) + b"\x00\x01\x40"
-    return record(name, TYPE_NSEC, rdata, ttl)
+    return record(name, TYPE_NSEC, rdata, ttl, record_class)
 
 
-def build_response(questions, hostnames, published_ip, transaction_id=0):
+def build_response(
+    questions,
+    hostnames,
+    published_ip,
+    transaction_id=0,
+    legacy_question_section=None,
+):
+    # RFC 6762 section 6.7 requires conventional DNS formatting for queries
+    # received from an ephemeral source port.
+    legacy_unicast = legacy_question_section is not None
+    response_ttl = LEGACY_UNICAST_TTL if legacy_unicast else MDNS_TTL
+    response_class = CLASS_IN if legacy_unicast else CLASS_CACHE_FLUSH
     answers = {}
     additionals = {}
 
@@ -201,10 +241,23 @@ def build_response(questions, hostnames, published_ip, transaction_id=0):
         a_key = (name, TYPE_A)
         nsec_key = (name, TYPE_NSEC)
         if record_type in (TYPE_A, TYPE_ANY):
-            answers[a_key] = a_record(name, published_ip)
-            additionals[nsec_key] = nsec_record(name)
+            answers[a_key] = a_record(
+                name,
+                published_ip,
+                ttl=response_ttl,
+                record_class=response_class,
+            )
+            additionals[nsec_key] = nsec_record(
+                name,
+                ttl=response_ttl,
+                record_class=response_class,
+            )
         elif record_type == TYPE_AAAA:
-            answers[nsec_key] = nsec_record(name)
+            answers[nsec_key] = nsec_record(
+                name,
+                ttl=response_ttl,
+                record_class=response_class,
+            )
 
     if not answers:
         return None
@@ -217,11 +270,12 @@ def build_response(questions, hostnames, published_ip, transaction_id=0):
             "!6H",
             transaction_id,
             FLAG_RESPONSE_AUTHORITATIVE,
-            0,
+            len(questions) if legacy_unicast else 0,
             len(answers),
             0,
             len(additionals),
         )
+        + (legacy_question_section or b"")
         + b"".join(answers.values())
         + b"".join(additionals.values())
     )
@@ -322,7 +376,7 @@ class HostnameResponder:
                 continue
 
             try:
-                transaction_id, _, questions = parse_questions(data)
+                transaction_id, _, questions, question_section = parse_query(data)
             except (UnicodeDecodeError, ValueError, struct.error):
                 continue
             if not questions:
@@ -359,7 +413,10 @@ class HostnameResponder:
                     unicast_questions,
                     self._hostnames,
                     self.published_ip,
-                    transaction_id if legacy_unicast else 0,
+                    transaction_id=transaction_id if legacy_unicast else 0,
+                    legacy_question_section=(
+                        question_section if legacy_unicast else None
+                    ),
                 )
                 if response is not None:
                     with suppress(OSError):

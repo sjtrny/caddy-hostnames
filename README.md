@@ -13,6 +13,7 @@ This makes containers discoverable on your local network **without needing DNS o
 - Both space and comma separators
 - Only .local domains are published (others are ignored)
 - Direct A and negative AAAA answers without advertising unrelated DNS-SD services
+- Multicast, QU, and legacy-unicast responses for modern and one-shot resolvers
 
 ## Configuration
 
